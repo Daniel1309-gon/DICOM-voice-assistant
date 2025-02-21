@@ -1,0 +1,11 @@
+builder.py
+isp.py
+abstraccion.py
+scripts/
+share/
+.gradio/
+__pycache__/
+Lib/
+Abstracción,ISPyBuilder.zip
+app.py
+pyvenv.cfg
