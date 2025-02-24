@@ -4,7 +4,27 @@ import numpy as np
 import speech_recognition as sr
 import os
 import threading
-from fft import apply_fft_contrast, apply_fft_rotation, apply_fft_zoom
+import tkinter as tk
+from tkinter import ttk
+from openai import OpenAI
+import pyttsx3
+
+
+from dotenv import load_dotenv
+
+# Cargar variables de entorno
+load_dotenv()
+
+# Obtener la clave de API
+
+client = OpenAI(api_key = os.getenv("OPENAI_API_KEY")) 
+
+# Inicializar el motor de texto a voz
+engine = pyttsx3.init()
+
+def speak(text):
+    engine.say(text)
+    engine.runAndWait()
 
 # Ruta donde están almacenadas las imágenes DICOM
 DICOM_PATH = "./dicom_images/"
@@ -14,13 +34,11 @@ running = True
 current_index = 0
 dicom_files = []
 contrast_factor = 1.0  # Factor para el contraste
-rotation_angle = 0  # Ángulo de rotación
 zoom_factor = 1.0  # Factor de zoom
 
 # Función para cargar imágenes DICOM
 def load_dicom_images():
     global dicom_files
-
     if os.path.exists(DICOM_PATH):
         dicom_files = [os.path.join(DICOM_PATH, f) for f in os.listdir(DICOM_PATH) if f.endswith(".dcm")]
         if not dicom_files:
@@ -31,57 +49,48 @@ def load_dicom_images():
         print(f"No se encontró la carpeta {DICOM_PATH}. Asegúrate de haber subido las imágenes.")
         return False
 
-# Función para aplicar transformación a la imagen
+# Función para procesar la imagen
 def process_image(image):
-    global contrast_factor, rotation_angle, zoom_factor
-
-    # Aplicar contraste
+    global contrast_factor, zoom_factor
     image = cv2.convertScaleAbs(image, alpha=contrast_factor, beta=0)
-
-    # Rotar la imagen
-    if rotation_angle != 0:
-        (h, w) = image.shape
-        center = (w // 2, h // 2)
-        M = cv2.getRotationMatrix2D(center, rotation_angle, 1.0)
-        image = cv2.warpAffine(image, M, (w, h))
-
-    # Aplicar zoom
     if zoom_factor != 1.0:
         h, w = image.shape
         new_w, new_h = int(w * zoom_factor), int(h * zoom_factor)
         image = cv2.resize(image, (new_w, new_h))
-
-        # Recortar el centro de la imagen si el zoom es mayor a 1
-        if zoom_factor > 1.0:
-            x_start = (new_w - w) // 2
-            y_start = (new_h - h) // 2
-            image = image[y_start:y_start+h, x_start:x_start+w]
-
     return image
 
-# Función para mostrar una imagen a la vez
+# Función para mostrar imágenes DICOM
 def show_dicom_image(index):
     if 0 <= index < len(dicom_files):
         dicom_data = pydicom.dcmread(dicom_files[index])
         image = dicom_data.pixel_array
         image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX)
         image = np.uint8(image)
-
-        # Aplicar transformaciones
         processed_image = process_image(image)
-
-        # Mostrar la imagen en la misma ventana
         cv2.imshow("Imagen DICOM", processed_image)
+        cv2.waitKey(1)
 
-# Función para manejar los comandos de voz
+# Función para consultar a OpenAI
+def ask_openai(question):
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "system", "content": "Eres un asistente de voz médico."},
+                  {"role": "user", "content": question}]
+        )
+        answer = response.choices[0].message.content
+        return answer
+    except Exception as e:
+        return "Hubo un error al conectar con la IA."
+
+# Función para manejar comandos de voz
 def recognize_speech():
-    global running, current_index, contrast_factor, rotation_angle, zoom_factor
-
+    global running, current_index, contrast_factor, zoom_factor
     recognizer = sr.Recognizer()
     
     while running:
         with sr.Microphone() as source:
-            print("Di un comando ('siguiente', 'contraste más', 'contraste menos', 'rotar', 'zoom más', 'zoom menos', 'salir')...")
+            print("Di un comando...")
             recognizer.adjust_for_ambient_noise(source)
             audio_data = recognizer.listen(source)
 
@@ -89,88 +98,34 @@ def recognize_speech():
             command = recognizer.recognize_google(audio_data, language='es-ES').lower()
             print(f"Comando reconocido: {command}")
 
-            commands_siguiente = [
-                "siguiente", "siguiente imagen", "próxima", "próxima imagen",
-                "siguiente foto", "próxima foto", "siguiente radiografía", "próxima radiografía",
-                "pasar imagen", "pasar a la siguiente", "ver siguiente"
-            ]
-
-            commands_anterior = [
-                "anterior", "anterior imagen", "anterior foto", "anterior radiografía",
-                "regresar", "regresar imagen", "regresar foto", "regresar radiografía",
-                "volver atrás", "volver a la anterior", "imagen anterior", "foto anterior",
-                "radiografía anterior", "pasar a la anterior", "ver anterior"
-            ]
-
-            commands_aum_contraste = [
-                "aumenta contraste", "aumentar contraste", "contraste más", "más contraste",
-                "más brillo", "brillo más", "aumenta brillo", "aumentar brillo",
-                "aumentar el contraste", "aumenta el contraste", "subir contraste", "subir brillo"
-            ]
-
-            commands_dis_contraste = [
-                "disminuye contraste", "disminuir contraste", "contraste menos", "menos contraste",
-                "menos brillo", "brillo menos", "disminuye brillo", "disminuir brillo",
-                "disminuir el contraste", "disminuye el contraste", "bajar contraste", "bajar brillo"
-            ]
-
-            commands_rotar_izq = [
-                "rota a la izquierda", "gira a la izquierda", "gira la imagen a la izquierda",
-                "girar imagen a la izquierda", "rotar a la izquierda", "girar a la izquierda",
-                "voltear izquierda", "girar en sentido antihorario", "girar en contra de las agujas del reloj"
-            ]
-
-            commands_rotar_der = [
-                "rota a la derecha", "gira a la derecha", "gira la imagen a la derecha",
-                "girar imagen a la derecha", "rotar a la derecha", "girar a la derecha",
-                "voltear derecha", "girar en sentido horario", "girar en el sentido de las agujas del reloj"
-            ]
-
-            commands_zoom_mas = [
-                "haz zoom", "aumenta zoom", "zoom más", "zoom in", "acercar", "acercar imagen",
-                "acercar zoom", "zoom adelante", "agrandar", "hacer más grande", "más grande"
-            ]
-
-            commands_zoom_menos = [
-                "quita zoom", "disminuye zoom", "zoom menos", "zoom out", "alejar", "alejar imagen",
-                "alejar zoom", "zoom atrás", "hacer más pequeño", "reducir imagen", "más pequeño"
-            ]
-
-
-            if command in commands_siguiente:
-                current_index += 1
-                if current_index >= len(dicom_files):  
-                    current_index = 0  # Reiniciar al inicio si se llega al final
-            
-            elif command in commands_anterior:
-                current_index -= 1
-                if current_index < 0:
-                    current_index = len(dicom_files) - 1
-
-            elif command in commands_aum_contraste:
-                contrast_factor += 0.2  # Aumentar contraste
-
-            elif command in commands_dis_contraste:
-                contrast_factor = max(0.2, contrast_factor - 0.2)  # Disminuir contraste
-
-            elif command in commands_rotar_izq:
-                rotation_angle = (rotation_angle + 90) % 360  # Rotar 90° cada vez
-            
-            elif command in commands_rotar_der:
-                rotation_angle = (rotation_angle - 90) % 360  # Rotar 90° cada vez
-
-            elif command in commands_zoom_mas:
-                zoom_factor = min(2.5, zoom_factor + 0.2)  # Aumentar zoom (máx 2.5x)
-
-            elif command in commands_zoom_menos:
-                zoom_factor = max(1.0, zoom_factor - 0.2)  # Disminuir zoom (mín 1x)
-
-            elif command == "salir":
+            if "siguiente" in command:
+                current_index = (current_index + 1) % len(dicom_files)
+            elif "anterior" in command:
+                current_index = (current_index - 1) % len(dicom_files)
+            elif "aumenta brillo" in command:
+                contrast_factor += 0.2
+            elif "disminuye brillo" in command:
+                contrast_factor = max(0.2, contrast_factor - 0.2)
+            elif "zoom más" in command:
+                zoom_factor = min(2.5, zoom_factor + 0.2)
+            elif "zoom menos" in command:
+                zoom_factor = max(1.0, zoom_factor - 0.2)
+            elif "salir" in command:
                 print("Cerrando programa...")
                 running = False
+                root.quit()
                 break  
-
-            # Mostrar imagen actualizada con los cambios
+            elif "ia" in command or "inteligencia artificial" in command:
+                print("Dime tu pregunta para la IA...")
+                speak("Dime tu pregunta para la inteligencia artificial")
+                with sr.Microphone() as source:
+                    audio_data = recognizer.listen(source)
+                question = recognizer.recognize_google(audio_data, language='es-ES')
+                print(f"Pregunta a la IA: {question}")
+                response = ask_openai(question)
+                print(f"Respuesta de la IA: {response}")
+                speak(response)
+            
             show_dicom_image(current_index)
 
         except sr.UnknownValueError:
@@ -178,20 +133,52 @@ def recognize_speech():
         except sr.RequestError:
             print("Error en la solicitud de reconocimiento")
 
-# Cargar imágenes
-if load_dicom_images():
-    # Mostrar la primera imagen
+# Interfaz gráfica con Tkinter
+def create_ui():
+    global root
+    root = tk.Tk()
+    root.title("Visor DICOM")
+    btn_prev = ttk.Button(root, text="Anterior", command=lambda: change_image(-1))
+    btn_prev.pack()
+    btn_next = ttk.Button(root, text="Siguiente", command=lambda: change_image(1))
+    btn_next.pack()
+    btn_zoom_in = ttk.Button(root, text="Zoom +", command=lambda: adjust_zoom(0.2))
+    btn_zoom_in.pack()
+    btn_zoom_out = ttk.Button(root, text="Zoom -", command=lambda: adjust_zoom(-0.2))
+    btn_zoom_out.pack()
+    btn_brighter = ttk.Button(root, text="Aumentar Brillo", command=lambda: adjust_contrast(0.2))
+    btn_brighter.pack()
+    btn_darker = ttk.Button(root, text="Disminuir Brillo", command=lambda: adjust_contrast(-0.2))
+    btn_darker.pack()
+    root.protocol("WM_DELETE_WINDOW", on_close)
+    root.mainloop()
+
+# Funciones UI
+def change_image(step):
+    global current_index
+    current_index = (current_index + step) % len(dicom_files)
     show_dicom_image(current_index)
 
-    # Crear el hilo para el reconocimiento de voz
-    thread_voice = threading.Thread(target=recognize_speech)
+def adjust_contrast(amount):
+    global contrast_factor
+    contrast_factor += amount
+    show_dicom_image(current_index)
+
+def adjust_zoom(amount):
+    global zoom_factor
+    zoom_factor = max(1.0, min(2.5, zoom_factor + amount))
+    show_dicom_image(current_index)
+
+# Función para manejar el cierre
+def on_close():
+    global running
+    running = False
+    root.quit()
+    cv2.destroyAllWindows()
+
+if load_dicom_images():
+    show_dicom_image(current_index)
+    thread_voice = threading.Thread(target=recognize_speech, daemon=True)
     thread_voice.start()
-
-    # Mantener la ventana abierta hasta que se diga "salir"
-    while running:
-        if cv2.waitKey(100) & 0xFF == 27:  # Presionar ESC para salir manualmente
-            running = False
-            break
-
-    # Cerrar todo al finalizar
+    create_ui()
     cv2.destroyAllWindows()

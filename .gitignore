@@ -8,4 +8,6 @@ __pycache__/
 Lib/
 Abstracción,ISPyBuilder.zip
 app.py
+.env
+
 pyvenv.cfg
