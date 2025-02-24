@@ -157,7 +157,7 @@ class DicomViewer:
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {"role": "system", "content": "Eres un asistente de voz médico."},
+                        {"role": "system", "content": "Eres un asistente de voz médico, quiero que me des una respuesta clara y concisa."},
                         {"role": "user", "content": question}
                     ]
                 )
@@ -174,7 +174,7 @@ class DicomViewer:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "Eres un asistente de voz médico."},
+                    {"role": "system", "content": "Eres un asistente de voz médico, quiero que me des una respuesta clara y concisa."},
                     {"role": "user", "content": question}
                 ]
             )
