@@ -2,7 +2,7 @@ aiofiles==23.2.1
 annotated-types==0.7.0
 anyio==4.8.0
 certifi==2025.1.31
-cffi==1.17.1
+cffi==1.17.1p
 charset-normalizer==3.4.1
 click==8.1.8
 colorama==0.4.6
