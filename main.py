@@ -10,6 +10,8 @@ from PIL import Image, ImageTk
 from openai import OpenAI
 import pyttsx3
 from dotenv import load_dotenv
+import base64
+import io
 
 # Cargar variables de entorno
 load_dotenv()
@@ -34,6 +36,7 @@ class DicomViewer:
         self.dicom_files = []
         self.contrast_factor = 1.0
         self.zoom_factor = 1.0
+        self.current_image = None  # Para almacenar la imagen actual procesada
         
         # Configurar el diseño principal
         self.setup_layout()
@@ -94,6 +97,9 @@ class DicomViewer:
         self.ai_text.pack(fill=tk.X, pady=5)
         
         ttk.Button(ai_frame, text="Hacer Pregunta", command=self.ask_ai_question).pack(fill=tk.X, pady=5)
+        
+        # Botón para analizar imagen
+        ttk.Button(ai_frame, text="Analizar Imagen", command=self.analyze_current_image).pack(fill=tk.X, pady=5)
 
         # Estado
         self.status_label = ttk.Label(controls_frame, text="Listo")
@@ -124,6 +130,9 @@ class DicomViewer:
             image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX)
             image = np.uint8(image)
             processed_image = self.process_image(image)
+            
+            # Guardar la imagen procesada actual
+            self.current_image = processed_image
             
             # Convertir para Tkinter
             image = Image.fromarray(processed_image)
@@ -183,6 +192,67 @@ class DicomViewer:
         except Exception as e:
             return "Hubo un error al conectar con la IA."
 
+    def encode_image_to_base64(self, image_array):
+        """Convierte una imagen de NumPy array a base64 string"""
+        # Convertir a PIL Image
+        pil_image = Image.fromarray(image_array)
+        
+        # Guardar en un buffer de bytes
+        buffer = io.BytesIO()
+        pil_image.save(buffer, format="PNG")
+        
+        # Convertir a base64
+        img_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        return img_str
+
+    def analyze_current_image(self):
+        """Envía la imagen actual a OpenAI para análisis"""
+        if self.current_image is not None:
+            self.status_label.config(text="Analizando imagen...")
+            
+            try:
+                # Codificar la imagen en base64
+                base64_image = self.encode_image_to_base64(self.current_image)
+                
+                # Enviar a OpenAI
+                response = client.chat.completions.create(
+                    model="gpt-4o",  # Usar modelo compatible con imágenes
+                    messages=[
+                        {
+                            "role": "system", 
+                            "content": "Eres un asistente médico especializado en análisis de imágenes DICOM. No uses markdown para responder, solo texto plano  sin usar * o **. Proporciona un análisis de esta, esta sacada de un dataset de radiografias."
+                        },
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "Analiza esta imagen médica y  realiza un analisis breve y conciso, son de un estudio de breast invasive carcinome. Estamos en desarrollo de un sistema para mejorar el tiempo de analisis de estas imagenes. Si ves algo relevante, descríbelo. La imagen es una radiografía DICOM, genera la respuesta en texto plano lo cual sera leido por un asistente de voz."},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/png;base64,{base64_image}"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens=500
+                )
+                
+                analysis = response.choices[0].message.content
+                
+                # Mostrar en la interfaz y hablar
+                self.ai_text.delete(1.0, tk.END)
+                self.ai_text.insert(tk.END, analysis)
+                self.speak(analysis)
+                
+                self.status_label.config(text="Análisis de imagen completado")
+                
+            except Exception as e:
+                error_msg = f"Error al analizar imagen: {str(e)}"
+                self.status_label.config(text=error_msg)
+                print(error_msg)
+        else:
+            self.status_label.config(text="No hay imagen para analizar")
 
     def start_voice_recognition(self):
         self.voice_thread = threading.Thread(target=self.recognize_speech, daemon=True)
@@ -210,6 +280,8 @@ class DicomViewer:
                         self.adjust_zoom(0.2)
                     elif "zoom menos" in command:
                         self.adjust_zoom(-0.2)
+                    elif "analizar imagen" in command or "analiza imagen" in command:
+                        self.analyze_current_image()
                     elif "ia" in command or "inteligencia artificial" in command:
                         print("Dime tu pregunta para la IA...")
                         speak("Dime tu pregunta para la inteligencia artificial")
